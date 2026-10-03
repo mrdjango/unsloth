@@ -24,7 +24,7 @@ import {
   type AccountSetupCode,
   type StudioAccount,
 } from "@/features/settings/api/accounts";
-import { fetchBlockedModels, saveBlockedModels } from "./api";
+import { fetchCatalog, saveCatalog, type CatalogEntry } from "./api";
 
 function errorText(reason: unknown): string {
   return reason instanceof Error ? reason.message : "Something went wrong";
@@ -183,20 +183,21 @@ function UsersSection({ onError }: { onError: (message: string | null) => void }
 function ModelsSection({ onError }: { onError: (message: string | null) => void }) {
   const [loaded, setLoaded] = useState<string[] | null>(null);
   const [cached, setCached] = useState<CachedModelRepo[] | null>(null);
-  const [blocked, setBlocked] = useState<string[] | null>(null);
-  const [newBlock, setNewBlock] = useState("");
+  const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const [status, cachedModels, blockedModels] = await Promise.all([
+      const [status, cachedModels, entries] = await Promise.all([
         getInferenceStatus(),
         listCachedModels(),
-        fetchBlockedModels(),
+        fetchCatalog(),
       ]);
       setLoaded(status.loaded ?? (status.active_model ? [status.active_model] : []));
       setCached(cachedModels);
-      setBlocked(blockedModels);
+      setCatalog(entries);
+      setDrafts({});
     } catch (reason) {
       onError(errorText(reason));
     }
@@ -218,25 +219,23 @@ function ModelsSection({ onError }: { onError: (message: string | null) => void 
     }
   }
 
-  const isBlocked = (id: string) => !!blocked?.some((b) => b.toLowerCase() === id.toLowerCase());
-  const setBlockedFor = (id: string, block: boolean) =>
-    run(async () => {
-      const rest = (blocked ?? []).filter((b) => b.toLowerCase() !== id.toLowerCase());
-      setBlocked(await saveBlockedModels(block ? [...rest, id] : rest));
-    });
-
-  function addBlock(event: SyntheticEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const id = newBlock.trim();
-    if (!id) return;
-    setNewBlock("");
-    void setBlockedFor(id, true);
-  }
+  const entryFor = (id: string) =>
+    catalog?.find((entry) => entry.model_id.toLowerCase() === id.toLowerCase());
+  const writeCatalog = (next: CatalogEntry[]) =>
+    run(async () => setCatalog(await saveCatalog(next)));
+  const publish = (id: string, alias: string) =>
+    writeCatalog([...(catalog ?? []).filter((e) => e.model_id.toLowerCase() !== id.toLowerCase()), { model_id: id, alias }]);
+  const unpublish = (id: string) =>
+    writeCatalog((catalog ?? []).filter((e) => e.model_id.toLowerCase() !== id.toLowerCase()));
+  // Published models that are no longer on disk still need a way to be withdrawn.
+  const orphaned = (catalog ?? []).filter(
+    (entry) => !cached?.some((m) => m.repo_id.toLowerCase() === entry.model_id.toLowerCase()),
+  );
 
   return (
     <Section
       title="Models"
-      description="See what is loaded, unload or delete models, and block models from other accounts. Blocked models can still be used by the owner."
+      description="Other accounts see and use only the models you publish here, under the alias you choose. They cannot download models and never see the real name."
     >
       <h3 className="mb-1 text-sm font-medium">Loaded now</h3>
       {loaded === null ? (
@@ -261,68 +260,83 @@ function ModelsSection({ onError }: { onError: (message: string | null) => void 
         </ul>
       )}
 
-      <h3 className="mb-1 text-sm font-medium">Blocked for other accounts</h3>
-      <form onSubmit={addBlock} className="mb-2 flex gap-2">
-        <Input
-          value={newBlock}
-          onChange={(e) => setNewBlock(e.target.value)}
-          placeholder="org/model-name"
-          aria-label="Model to block"
-        />
-        <Button type="submit" disabled={busy || !newBlock.trim()}>
-          Block
-        </Button>
-      </form>
-      {blocked && blocked.length > 0 && (
-        <ul className="mb-3 divide-y divide-border">
-          {blocked.map((id) => (
-            <li key={id} className="flex items-center gap-3 py-2">
-              <span className="min-w-0 flex-1 truncate font-mono text-sm">{id}</span>
-              <Button variant="outline" size="sm" disabled={busy} onClick={() => void setBlockedFor(id, false)}>
-                Unblock
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-
       <h3 className="mb-1 text-sm font-medium">Downloaded models</h3>
-      {cached === null ? (
+      {cached === null || catalog === null ? (
         <Spinner />
       ) : cached.length === 0 ? (
         <p className="text-sm text-muted-foreground">No downloaded models.</p>
       ) : (
         <ul className="divide-y divide-border">
-          {cached.map((model) => (
-            <li key={model.repo_id} className="flex items-center gap-3 py-2">
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-sm">{model.repo_id}</div>
-                <div className="text-xs text-muted-foreground">{formatSize(model.size_bytes)}</div>
-              </div>
-              <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                Blocked
-                <Switch
-                  checked={isBlocked(model.repo_id)}
+          {cached.map((model) => {
+            const entry = entryFor(model.repo_id);
+            const draft = drafts[model.repo_id] ?? entry?.alias ?? "";
+            return (
+              <li key={model.repo_id} className="flex flex-wrap items-center gap-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-mono text-sm">{model.repo_id}</div>
+                  <div className="text-xs text-muted-foreground">{formatSize(model.size_bytes)}</div>
+                </div>
+                <Input
+                  className="w-44"
+                  value={draft}
+                  placeholder="Alias shown to users"
+                  aria-label={`Alias for ${model.repo_id}`}
                   disabled={busy}
-                  aria-label={`Block ${model.repo_id}`}
-                  onCheckedChange={(next) => void setBlockedFor(model.repo_id, next)}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [model.repo_id]: e.target.value }))}
+                  onBlur={() => {
+                    if (entry && draft.trim() && draft.trim() !== entry.alias) {
+                      void publish(model.repo_id, draft.trim());
+                    }
+                  }}
                 />
-              </label>
-              <Button
-                variant="destructive"
-                size="sm"
-                disabled={busy}
-                onClick={() => {
-                  if (window.confirm(`Delete ${model.repo_id} from disk?`)) {
-                    void run(() => deleteCachedModel(model.repo_id));
-                  }
-                }}
-              >
-                Delete
-              </Button>
-            </li>
-          ))}
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  Published
+                  <Switch
+                    checked={!!entry}
+                    disabled={busy}
+                    aria-label={`Publish ${model.repo_id}`}
+                    onCheckedChange={(next) =>
+                      void (next ? publish(model.repo_id, draft.trim()) : unpublish(model.repo_id))
+                    }
+                  />
+                </label>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => {
+                    if (window.confirm(`Delete ${model.repo_id} from disk? It is also unpublished.`)) {
+                      void run(async () => {
+                        if (entry) await saveCatalog((catalog ?? []).filter((e) => e !== entry));
+                        await deleteCachedModel(model.repo_id);
+                      });
+                    }
+                  }}
+                >
+                  Delete
+                </Button>
+              </li>
+            );
+          })}
         </ul>
+      )}
+
+      {orphaned.length > 0 && (
+        <>
+          <h3 className="mb-1 mt-3 text-sm font-medium">Published but not on disk</h3>
+          <ul className="divide-y divide-border">
+            {orphaned.map((entry) => (
+              <li key={entry.model_id} className="flex items-center gap-3 py-2">
+                <span className="min-w-0 flex-1 truncate font-mono text-sm">
+                  {entry.model_id} → {entry.alias}
+                </span>
+                <Button variant="outline" size="sm" disabled={busy} onClick={() => void unpublish(entry.model_id)}>
+                  Unpublish
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </Section>
   );

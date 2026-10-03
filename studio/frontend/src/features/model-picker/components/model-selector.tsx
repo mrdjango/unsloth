@@ -9,6 +9,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useIsAccountOwner } from "@/features/auth";
 import { ApiProviderLogo } from "@/features/chat/api-provider-logo";
 
 import type { CapabilityKey } from "@/features/hub";
@@ -405,11 +406,17 @@ function ModelSelectorContent({
       ? { status: npuStatus, onStatusChange: setNpuStatus }
       : undefined;
   // Connected sits in the section toggle, shown only with external providers.
+  // Only the owner browses and downloads; other accounts get the models the owner published.
+  const owner = useIsAccountOwner();
+  const baseSectionTabs = useMemo(
+    () => (owner ? HUB_SECTION_TABS : HUB_SECTION_TABS.filter((tab) => tab.value === "downloaded")),
+    [owner],
+  );
   const hubSectionTabs = useMemo(
     () =>
       hasExternal
         ? [
-            ...HUB_SECTION_TABS,
+            ...baseSectionTabs,
             {
               value: "connected",
               label: "Connected",
@@ -418,8 +425,8 @@ function ModelSelectorContent({
               ),
             },
           ]
-        : HUB_SECTION_TABS,
-    [hasExternal],
+        : baseSectionTabs,
+    [hasExternal, baseSectionTabs],
 
   );
   const wantsConnectedDefault = Boolean(
@@ -430,11 +437,16 @@ function ModelSelectorContent({
   const [hubSection, setHubSection] = useState<HubSection>(() =>
     wantsConnectedDefault
       ? "connected"
-      : defaultHubSection(hasAdditionalOnDeviceModels),
+      : owner
+        ? defaultHubSection(hasAdditionalOnDeviceModels)
+        : "downloaded",
   );
   // Connected is only valid while external providers exist; fall back otherwise.
+  const fallbackSection: HubSection = owner ? "recommended" : "downloaded";
   const effectiveHubSection: HubSection =
-    hubSection === "connected" && !hasExternal ? "recommended" : hubSection;
+    (hubSection === "connected" && !hasExternal) || (!owner && hubSection === "recommended")
+      ? fallbackSection
+      : hubSection;
 
   const [configTarget, setConfigTarget] = useState<ModelPickTarget | null>(
     null,
@@ -451,7 +463,9 @@ function ModelSelectorContent({
       setHubSection(
         wantsConnectedDefault
           ? "connected"
-          : defaultHubSection(hasAdditionalOnDeviceModels),
+          : owner
+            ? defaultHubSection(hasAdditionalOnDeviceModels)
+            : "downloaded",
       );
     }
     if (!open && wasOpen.current) {
@@ -650,11 +664,11 @@ function ModelSelectorContent({
               onSelect={handlePick}
               resolveDownloadFootprint={resolveDownloadFootprint}
               onFoldersChange={onFoldersChange}
-              onBrowseHub={onBrowseHub}
+              onBrowseHub={owner ? onBrowseHub : undefined}
               onConfigureConnection={onConfigureConnection}
               onModelsChange={onModelsChange}
               onConfigure={openConfigPage}
-              deleteDisabled={deleteDisabled}
+              deleteDisabled={deleteDisabled || !owner}
               onEject={hasSelection && onEject ? onEject : undefined}
               task={task}
               catalog={catalog}

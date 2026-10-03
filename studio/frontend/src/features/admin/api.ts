@@ -4,6 +4,11 @@
 import { authFetch } from "@/features/auth";
 import { readFastApiError } from "@/lib/format-fastapi-error";
 
+export interface CatalogEntry {
+  model_id: string;
+  alias: string;
+}
+
 async function adminRequest(path: string, init?: RequestInit): Promise<Response> {
   const response = await authFetch(`/api/admin${path}`, init);
   if (!response.ok) {
@@ -12,16 +17,17 @@ async function adminRequest(path: string, init?: RequestInit): Promise<Response>
   return response;
 }
 
-export async function fetchBlockedModels(): Promise<string[]> {
-  const response = await adminRequest("/model-policy");
-  return ((await response.json()) as { blocked_models: string[] }).blocked_models;
+export async function fetchCatalog(): Promise<CatalogEntry[]> {
+  const response = await adminRequest("/model-catalog");
+  return ((await response.json()) as { models: CatalogEntry[] }).models;
 }
 
-export async function saveBlockedModels(blocked: string[]): Promise<string[]> {
-  const response = await adminRequest("/model-policy", {
+/** Replaces the whole catalog; a blank alias is replaced by a generated one. */
+export async function saveCatalog(models: CatalogEntry[]): Promise<CatalogEntry[]> {
+  const response = await adminRequest("/model-catalog", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ blocked_models: blocked }),
+    body: JSON.stringify({ models }),
   });
-  return ((await response.json()) as { blocked_models: string[] }).blocked_models;
+  return ((await response.json()) as { models: CatalogEntry[] }).models;
 }

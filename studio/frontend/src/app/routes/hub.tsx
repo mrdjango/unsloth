@@ -2,7 +2,8 @@
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import type { CapabilityKey } from "@/features/hub";
-import { createRoute, lazyRouteComponent } from "@tanstack/react-router";
+import { createRoute, lazyRouteComponent, redirect } from "@tanstack/react-router";
+import { isAccountOwner } from "@/features/auth/account-session";
 import { requireAuth } from "../auth-guards";
 import { Route as rootRoute } from "./__root";
 
@@ -34,7 +35,11 @@ export interface ModelsSearch {
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
   path: "/hub",
-  beforeLoad: () => requireAuth(),
+  beforeLoad: async () => {
+    await requireAuth();
+    // Browsing and downloading models is owner-only; others use what the owner published.
+    if (!isAccountOwner()) throw redirect({ to: "/chat" });
+  },
   component: ModelsPage,
   validateSearch: (search: Record<string, unknown>): ModelsSearch => {
     const next: ModelsSearch = {};

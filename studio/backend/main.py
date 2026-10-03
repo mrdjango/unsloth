@@ -1039,6 +1039,12 @@ logger = LogConfig.setup_logging(
     env = os.getenv("ENVIRONMENT_TYPE", "production"),
 )
 
+# Innermost on purpose (add_middleware inserts outermost-first, so this appends): it reads the account
+# the auth dependency bound, which only the task running the endpoint can see.
+from starlette.middleware import Middleware as _Middleware  # noqa: E402
+from utils.model_alias_middleware import ModelAliasMiddleware  # noqa: E402
+
+app.user_middleware.append(_Middleware(ModelAliasMiddleware))
 app.add_middleware(LoggingMiddleware)
 
 

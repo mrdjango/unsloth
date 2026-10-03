@@ -734,6 +734,11 @@ def repo_visible(
         return True
     if not repo_id:
         return False
+    if repo_type == "model":
+        # Other accounts see only what the owner published: no Hub grants, no public repos.
+        from auth import model_policy
+
+        return model_policy.is_published(repo_id)
     granted = model_grants() if grants is None else grants
     return _grant_key(repo_id, repo_type) in granted or repo_is_public(repo_id, repo_type)
 
@@ -829,9 +834,12 @@ def private_directory(path: str, folder: str) -> str:
 
 
 def authorize_download(repo_id: str, repo_type: str, hf_token) -> None:
-    """A cache hit is not proof the requester may read private Hub content."""
+    """Only the installation owner downloads; other accounts use what the owner published."""
     if not managed_account():
         return
+    raise HTTPException(
+        status_code = 403, detail = "Only the installation owner can download models"
+    )
     if not _source_speaks_for_the_cache():
         raise HTTPException(
             status_code = 403,

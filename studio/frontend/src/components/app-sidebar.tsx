@@ -2696,13 +2696,15 @@ export function AppSidebar() {
   // The Projects row repeats the section, so it only earns its place while the section is absent.
   const navRowPinned = (item: SidebarNavItemPref) =>
     sidebarNavRowPinned(item, sidebarNavAuto, { projectsSectionShowing });
+  // Only the owner browses and downloads models, so other accounts never get the Hub row.
+  const navRowAllowed = (item: SidebarNavItemPref) => isOwner || item.id !== "hub";
   const unpinnedNavIds = sidebarNav
-    .filter((item) => !navRowPinned(item))
+    .filter((item) => navRowAllowed(item) && !navRowPinned(item))
     .map((item) => item.id);
   // More needs two or more rows to be worth a click; with exactly one unpinned, the menu and that row are both dropped.
   const overflowNavIds = unpinnedNavIds.length > 1 ? unpinnedNavIds : [];
   const inlineNavIds = sidebarNav
-    .filter((item) => navRowPinned(item))
+    .filter((item) => navRowAllowed(item) && navRowPinned(item))
     .map((item) => item.id);
   // The mobile sheet shows labels regardless of the desktop pin state.
   const sidebarRowsLabelled = isMobile || sidebarState !== "collapsed";
